@@ -75,7 +75,10 @@ class Hold extends Model
 
             if ($updated) {
                 $this->status = 'expired';
-                $this->product->invalidateStockCache();
+
+                $product = Product::find($this->product_id);
+                $product?->invalidateStockCache();
+
                 Log::info("Hold released", ['hold_id' => $this->id, 'qty' => $this->qty]);
                 return true;
             }

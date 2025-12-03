@@ -11,7 +11,32 @@ class Order extends Model
 {
     use HasUuids;
 
-    protected $fillable = ['hold_id', 'status'];
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    protected $fillable = ['id', 'hold_id', 'status'];
+    protected $attributes = [
+        'status' => 'pending',
+    ];
+
+   protected static function booted()
+    {
+    static::created(function (Order $order) {
+        $pendingWebhooks = WebhookLog::where('order_id', $order->id)
+            ->whereNull('processed_at')
+            ->get();
+
+        foreach ($pendingWebhooks as $webhook) {
+            if ($webhook->status === 'success') {
+                $order->markAsPaid();
+            } elseif ($webhook->status === 'failure') {
+                $order->cancel();
+            }
+
+            $webhook->update(['processed_at' => now()]);
+        }
+    });
+    }
 
     public function hold()
     {
@@ -26,6 +51,8 @@ class Order extends Model
     public function markAsPaid(): bool
     {
         return DB::transaction(function () {
+            if ($this->status !== 'pending') return false;
+
             $updated = DB::table('orders')
                 ->where('id', $this->id)
                 ->where('status', 'pending')
@@ -33,15 +60,12 @@ class Order extends Model
 
             if ($updated) {
                 $this->status = 'paid';
-                
-                // Load hold with product
+
                 $hold = $this->hold()->with('product')->first();
-                
-                // Decrement actual stock now that payment is confirmed
                 if ($hold && $hold->product) {
                     $hold->product->decrementStock($hold->qty);
                 }
-                
+
                 Log::info("Order marked as paid", ['order_id' => $this->id]);
                 return true;
             }
@@ -53,6 +77,8 @@ class Order extends Model
     public function cancel(): bool
     {
         return DB::transaction(function () {
+            if ($this->status !== 'pending') return false;
+
             $updated = DB::table('orders')
                 ->where('id', $this->id)
                 ->where('status', 'pending')
@@ -60,13 +86,12 @@ class Order extends Model
 
             if ($updated) {
                 $this->status = 'cancelled';
-                
-                // Release the hold
+
                 $hold = $this->hold;
                 if ($hold) {
                     $hold->release();
                 }
-                
+
                 Log::info("Order cancelled", ['order_id' => $this->id]);
                 return true;
             }

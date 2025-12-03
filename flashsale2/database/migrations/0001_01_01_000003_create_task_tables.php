@@ -42,6 +42,7 @@ return new class extends Migration
             $table->string('idempotency_key')->unique();
             $table->json('payload');
             $table->uuid('order_id')->nullable();
+            $table->enum('status', ['success', 'failure'])->nullable();
             $table->timestamp('processed_at')->nullable();
             $table->timestamps();
         });
